@@ -1,2 +1,111 @@
+version: '3.6'
+services:
+  postgres:
+    image: postgres
+    restart: always
+    ports:
+      - target: 5432
+        published: 5432
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=postgres
 
-
+  hasura:
+    image: hasura/graphql-engine:latest.cli-migrations-v3 
+    command: sh -c 'rm -rf /tmp/log/stdout.log && mkfifo /tmp/log/stdout.log && /bin/graphql-engine serve | tee /tmp/log/stdout.log'
+    ports:
+      - "8080:8080"
+    depends_on:
+      - "postgres"
+    restart: always
+    volumes:
+      - logs:/tmp/log
+    environment:
+      HASURA_GRAPHQL_DATABASE_URL: postgres://postgres:postgres@postgres:5432/postgres
+      HASURA_GRAPHQL_ENABLE_CONSOLE: "true"
+      HASURA_GRAPHQL_ADMIN_SECRET: test
+      HASURA_GRAPHQL_ENABLED_LOG_TYPES: startup,query-log,http-log,webhook-log,websocket-log
+      HASURA_GRAPHQL_LOG_LEVEL: info
+
+  hasura-metric-adapter:
+    build:
+      context: ./
+      dockerfile: Dockerfile
+    image: metric:latest
+    ports:
+      - "9090:9090"
+    depends_on:
+      - "hasura"
+      - "otel-collector"
+      - "splunk"
+
+    volumes:
+      - logs:/tmp/log
+    environment:
+      LOG_FILE: /tmp/log/stdout.log
+      HASURA_GRAPHQL_ADMIN_SECRET: test
+      HASURA_GRAPHQL_ENDPOINT: "http://hasura:8080"
+      EXCLUDE_COLLECTORS: "cron-triggers;event-triggers;scheduled-events"
+      OPENTEL_ENDPOINT: "http://otel-collector:4317"
+
+  prometheus:
+    image: prom/prometheus:v2.30.3
+    ports:
+      - 9000:9090
+    volumes:
+      - ./example/prometheus:/etc/prometheus
+      - prometheus-data:/prometheus
+    command: --web.enable-lifecycle  --config.file=/etc/prometheus/prometheus.yml
+
+  grafana:
+    image: grafana/grafana:latest
+    ports:
+      - 3000:3000
+    volumes:
+      - ./example/grafana/provisioning:/etc/grafana/provisioning
+      - ./example/grafana/dashboards:/dashboards
+  
+  
+  otel-collector:
+    #image: otel/opentelemetry-collector-contrib:latest
+    image: quay.io/signalfx/splunk-otel-collector:0.83.0
+    command: ["--config=/etc/otel-collector-config.yaml"]
+    volumes:
+      - ./otel-collector-config.yaml:/etc/otel-collector-config.yaml
+    ports:
+      - "4317:4317" # OTLP gRPC receive
+    depends_on:
+     - "splunk"
+
+  
+  # Splunk Enterprise server:
+  splunk:
+    image: splunk/splunk:latest
+    container_name: splunk
+    environment:
+      - SPLUNK_START_ARGS=--accept-license
+      - SPLUNK_HEC_TOKEN="4c06387f-b4ef-4207-aaa7-bbe48e71e955"
+      - SPLUNK_PASSWORD=changeme
+    ports:
+      - 18000:8000
+      - 8088:8088
+    healthcheck:
+      test: ['CMD', 'curl', '-f', 'http://localhost:8000']
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    volumes:
+      - ./splunk.yml:/tmp/defaults/default.yml
+      - /opt/splunk/var
+      - /opt/splunk/etc
+
+  
+
+volumes:
+  db_data:
+  logs:
+  prometheus-data:
+
