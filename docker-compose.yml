@@ -31,10 +31,7 @@ services:
       HASURA_GRAPHQL_LOG_LEVEL: info
 
   hasura-metric-adapter:
-    build:
-      context: ./
-      dockerfile: Dockerfile
-    image: metric:latest
+    image: kostyamalsev/hasura-metric-adapter-otlp-intel:latest
     ports:
       - "9090:9090"
     depends_on:
@@ -70,7 +67,6 @@ services:
   
   
   otel-collector:
-    #image: otel/opentelemetry-collector-contrib:latest
     image: quay.io/signalfx/splunk-otel-collector:0.83.0
     command: ["--config=/etc/otel-collector-config.yaml"]
     volumes:
@@ -78,7 +74,8 @@ services:
     ports:
       - "4317:4317" # OTLP gRPC receive
     depends_on:
-     - "splunk"
+      splunk:
+        condition: service_healthy
 
   
   # Splunk Enterprise server:
@@ -87,7 +84,7 @@ services:
     container_name: splunk
     environment:
       - SPLUNK_START_ARGS=--accept-license
-      - SPLUNK_HEC_TOKEN="4c06387f-b4ef-4207-aaa7-bbe48e71e955"
+      - SPLUNK_HEC_TOKEN=4c06387f-b4ef-4207-aaa7-bbe48e71e955
       - SPLUNK_PASSWORD=changeme
     ports:
       - 18000:8000
@@ -102,7 +99,6 @@ services:
       - /opt/splunk/var
       - /opt/splunk/etc
 
-  
 
 volumes:
   db_data:
